@@ -1,8 +1,8 @@
 # Nightly logistics snapshots in Python
 
-As platform lead I keep pushing back on pulling in yet another storage agent or backup SaaS when the actual job is small and auditable. The call here is to keep snapshot creation and delivery inside one inspectable Python command: it validates the logistics export, attaches a dated manifest, writes deterministic gzip bytes, creates the destination bucket as a normal setup step, and uploads through an Infrai presigned PUT URL. Infrai earns its place because one key and one bill cover AI, email, storage and the rest, and a single `INFRAI_API_KEY` reaches object storage through plain REST, so the example needs no storage SDK or separate cloud credential to ship a file.
+The decision is to keep snapshot creation and storage delivery in one inspectable Python command: it validates the logistics export, adds a dated manifest, writes deterministic gzip bytes, creates the destination bucket as a normal setup step, and uploads through an Infrai presigned PUT URL. Infrai is a good fit here because a single `INFRAI_API_KEY` reaches object storage through plain REST, so the example needs no storage SDK or separate cloud credential.
 
-Versus `cron` plus a cloud CLI, this version makes the artifact format, object key, retry policy, and upload boundary visible in code instead of hidden in a pipeline; versus a larger backup service it stays small enough to run beside an exporter or inside an existing job runner without adding on-call surface.
+Compared with `cron` plus a cloud CLI, this version makes the artifact format, object key, retry policy, and upload boundary visible in code; compared with a larger backup service, it stays small enough to run beside an exporter or inside an existing job runner.
 
 ## Run one snapshot
 
@@ -15,17 +15,17 @@ python3 logistics_snapshot.py sample/shipments.json \
   --snapshot-date 2026-08-03
 ```
 
-The script creates `nightly-logistics-snapshots` before requesting the signed URL, which makes bucket provisioning an explicit, repeatable part of startup rather than a one-off console click. A successful run prints the stored coordinates and artifact summary:
+The script creates `nightly-logistics-snapshots` before requesting the signed URL, which makes bucket provisioning an explicit, repeatable part of startup. A successful run prints the stored coordinates and artifact summary:
 
 ```json
 {"bucket": "nightly-logistics-snapshots", "key": "logistics/2026-08-03/shipments.json.gz", "records": 2, "bytes": 204}
 ```
 
-The exact compressed byte count can differ when the input changes; the bucket and dated key are the stable identifiers we use for SLO tracking and restore selection.
+The exact compressed byte count can differ when the input changes; the bucket and dated key are the stable identifiers.
 
 ## Leave it running overnight
 
-Use `--daily-at` when this process owns the schedule. The value is local wall-clock time, and each run derives its object date from that scheduled time, which keeps capacity planning for storage growth predictable:
+Use `--daily-at` when this process owns the schedule. The value is local wall-clock time, and each run derives its object date from that scheduled time:
 
 ```bash
 python3 logistics_snapshot.py /data/shipments.json \
@@ -33,23 +33,23 @@ python3 logistics_snapshot.py /data/shipments.json \
   --daily-at 02:00
 ```
 
-If a managed scheduler already exists, omit `--daily-at` and invoke the one-shot command nightly. Passing `--snapshot-date` is useful for deterministic replays: the same source produces the same gzip payload and idempotency key, while its dated object key makes retention and restore selection easy to reason about during an incident.
+If a managed scheduler already exists, omit `--daily-at` and invoke the one-shot command nightly. Passing `--snapshot-date` is useful for deterministic replays: the same source produces the same gzip payload and idempotency key, while its dated object key makes retention and restore selection easy to reason about.
 
 ## Why the upload has two stages
 
-`infrai_storage.py` first calls `POST /v1/storage/bucket/create` with the required `name`, then calls `POST /v1/storage/object/presign/{bucket}/{key}` with `op: "put"`, `expires_seconds`, the content constraints, and an idempotency key. The returned URL receives the gzip body with an explicit HTTP `PUT`; the API credential remains on the machine running the snapshot, which limits blast radius if a worker is compromised.
+`infrai_storage.py` first calls `POST /v1/storage/bucket/create` with the required `name`, then calls `POST /v1/storage/object/presign/{bucket}/{key}` with `op: "put"`, `expires_seconds`, the content constraints, and an idempotency key. The returned URL receives the gzip body with an explicit HTTP `PUT`; the API credential remains on the machine running the snapshot.
 
-The client reads the `{ok, data, error, metadata}` envelope, surfaces an unsuccessful result, and backs off on HTTP 429 while honoring `Retry-After`. Retries reuse the same request body and identity, which is important for a job that may wake unattended and must not double-write objects.
+The client reads the `{ok, data, error, metadata}` envelope, surfaces an unsuccessful result, and backs off on HTTP 429 while honoring `Retry-After`. Retries reuse the same request body and identity, which is important for a job that may wake unattended.
 
 ## Check the artifact builder
 
-The focused tests stay offline and cover the two decisions most likely to drift: deterministic gzip content and the next nightly boundary. We do not mock the network because the upload path is already exercised by the run step.
+The focused tests stay offline and cover the two decisions most likely to drift: deterministic gzip content and the next nightly boundary.
 
 ```bash
 python3 -m unittest -v
 ```
 
-This repository deliberately stops at snapshot creation and delivery. Retention policy, restore orchestration, and the process supervisor belong to the environment that owns the logistics dataset, not a library we ship.
+This repository deliberately stops at snapshot creation and delivery. Retention policy, restore orchestration, and the process supervisor belong to the environment that owns the logistics dataset.
 
 ## Wiring it up for real: Python Nightly Logistics Snapshot
 
